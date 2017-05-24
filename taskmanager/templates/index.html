@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+
+{% block title %}OWAVS - Online Web Applications Vulnerability Scanner{% endblock %}
+
+{% block content %}
+<br />
+<div class='container'>
+  <div class='col-md-6'>
+    <form class="form-group" action="/" method="post">
+      {% csrf_token %}
+      {{ form }}
+      <br />
+      <input type="submit" class='btn btn-primary' value="Create task" name='_create' />
+    </form>
+  </div>
+
+
+
+  <!-- right -->
+  <!-- <div class='container'> -->
+  <div id='tasks' class='col-md-6 jumbotron'>
+    {% for task in tasks %}
+    <div data-value-id='{{ task.pk }}'>
+      <p> {{task.url}} <small><a href='delete/{{task.id}}' class='btn btn-danger'>Delete</a></small></p>
+      <div class='progress'>
+        <div class="progress-bar {% if task.progress < 100 %}progress-bar-striped active{% endif %}" role="progressbar"
+        aria-valuenow="{{task.progress}}" aria-valuemin="0" aria-valuemax="100" style="min-width: 2em; width: {{task.progress}}%">
+        {{task.progress}}%
+      </div>
+    </div>
+    <div class='subtasks container'>
+      {% for subtask in task.subtask_set.all %}
+      <div subtask-id='{{subtask.pk}}' class='col-md-12'>
+        <div {% if subtask.results.items|length > 0 %} data-target="#dropmenu{{subtask.pk}}" data-toggle="collapse"{% endif %} class="progress-bar {% if subtask.results.items|length > 0 %}progress-bar-danger{% endif %}{% if subtask.progress < 100 %}progress-bar-striped active{% endif %}" role="progressbar"
+        aria-valuenow="{{subtask.progress}}" aria-valuemin="0" aria-valuemax="100" style="min-width: 2em; width: {{subtask.progress}}%">
+        {{subtask.url}}
+      </div>
+      <br />
+      {% if subtask.progress == 100 %}
+      <div class='results well well-sm{% if subtask.results.items|length > 0 %} collapse{%endif%}' {% if subtask.results.items|length > 0 %}id="dropmenu{{subtask.pk}}"{%endif%}>
+        {% for key, value in subtask.results.items %}
+        {% if key == 'nikto' or key == 'xss' or key == 'csrf' or key == 'sql' %}
+        <div class="panel panel-default">
+          <div class="panel-heading">
+            {% if key == 'nikto'%}
+            <h3 class="panel-title">Nikto:</h3>
+            {% elif key == 'xss' %}
+            <h3 class="panel-title">XSS:</h3>
+            {% elif key == 'csrf' %}
+            <h3 class="panel-title">CSRF:</h3>
+            {% elif key == 'sql' %}
+            <h3 class="panel-title">SQL Injections:</h3>
+            {% endif %}
+          </div>
+          <div class='panel-body'>
+            {{ value|linebreaksbr|safe }}
+          </div>
+
+        </div>
+        {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    <br />
+    <br />
+    {% endfor %}
+  </div>
+
+  {% if task.progress == 100 %}
+  {% if task.portscan or task.cms %}
+
+  <div class='host results well well-sm'>
+    {% for key, value in task.results.items %}
+    {% if key == 'nmap' or 'cmsmap' %}
+    <div class="panel panel-default">
+      <div class="panel-heading">
+        {% if key == 'nmap'%}
+        <h3 class="panel-title">Nmap:</h3>
+        {% elif key == 'cmsmap' %}
+        <h3 class="panel-title">Cmsmap:</h3>
+        {% endif %}
+      </div>
+      <div>
+        {{ value|linebreaksbr|safe }}
+      </div>
+
+    </div>
+    {% endif %}
+    {% endfor %}
+    {% endif %}
+    {% endif %}
+  </div>
+  <br />
+  {% empty %}
+  <p class="empty">No values yet.</p>
+  {% endfor %}
+</div>
+</div>
+</div>
+
+{% endblock %}
+
+{% block extra_body %}
+<script>
+$(function () {
+  // Correctly decide between ws:// and wss://
+  var ws_scheme = window.location.protocol == "https:" ? "wss" : "ws";
+  var ws_path = ws_scheme + '://' + window.location.host + window.location.pathname + "stream/";
+  console.log("Connecting to " + ws_path);
+  var socket = new ReconnectingWebSocket(ws_path);
+  // Handle incoming messages
+  socket.onmessage = function(message) {
+    // Decode the JSON
+    console.log("Got message " + message.data);
+    var data = JSON.parse(message.data);
+    var streamName = data.stream;
+    var payload = data.payload;
+    if (streamName == "taskstr") {
+      // Handle different actions
+      if (payload.action == "create") {
+        // Create the new integer value
+        var content = "<div data-value-id=\'" + payload.pk
+        + "\'><p> " + payload.data.url + " <small><a href='delete/"+ payload.pk + "' class='btn btn-danger'>Delete</a></small> </p>"
+        + "<div class='progress'><div class='progress-bar progress-bar-striped active' role='progressbar' aria-valuenow=\'"
+        + payload.data.progress + "\' aria-valuemin='0' aria-valuemax='100' style='min-width: 2em; width: "+ payload.data.progress + "%\'>"
+        + payload.data.progress + "%</div></div><div class='subtasks container'></div>";
+        $("#tasks").append(content);
+        // Remove empty message
+        $("#tasks .empty").remove();
+      } else if (payload.action == "update") {
+        if ($("div[data-value-id=" + payload.pk +"]").length) {
+          $("div[data-value-id=" + payload.pk + "] p:first").text(payload.data.url);
+          $("div[data-value-id=" + payload.pk + "] div.progress div").attr("style", function(){
+            return "min-width: 2em; width: " + payload.data.progress + "%";
+          });
+          $("div[data-value-id=" + payload.pk + "] div.progress div").text(payload.data.progress+'%')
+          if (payload.data.progress < 100) {
+            $("div[data-value-id=" + payload.pk + "] div.progress div").addClass('progress-bar-striped active')
+          }
+          else {
+            $("div[data-value-id=" + payload.pk + "] div.progress div").removeClass('progress-bar-striped active')
+            var obj = JSON.parse(payload.data.results)
+            console.log(obj);
+            if ("nmap" in obj || "cmsmap" in obj) {
+              $("div[data-value-id=" + payload.pk + "]").append("<div class='host results well well-sm'></div>")
+              if ("nmap" in obj) {
+                $("div[data-value-id=" + payload.pk + "] div.host.results").append("<div class='panel panel-default'><div class='panel-heading'><h3 class='panel-title'>Nmap:</h3></div></div>")
+                $("div[data-value-id=" + payload.pk + "] div.host.results").append("<div class='panel panel-default'><div class='panel-body'>"+ obj.nmap.replace(/\n/g,"<br>") +"</div></div>")
+              }
+              if ("cmsmap" in obj) {
+                $("div[data-value-id=" + payload.pk + "] div.host.results").append("<div class='panel panel-default'><div class='panel-heading'><h3 class='panel-title'>CMSmap:</h3></div></div>")
+                $("div[data-value-id=" + payload.pk + "] div.host.results").append("<div class='panel panel-default'><div class='panel-body'>"+ obj.cmsmap.replace(/\n/g,"<br>") +"</div></div>")
+              }
+            }
+          }
+          // var cont = JSON.parse(JSON.stringify(payload.data.results.replace(/\n/g,"<br>")))
+          // console.log(JSON.parse(payload.data.results));
+          // .replace(/\n/g,"<br>")
+        } else {
+          var content = "<div data-value-id=\'" + payload.pk
+          + "\'><p> " + payload.data.url + " <small><a href='delete/"+ payload.pk + "' class='btn btn-danger'>Delete</a></small>  </p>"
+          + "<div class='progress'><div class='progress-bar progress-bar-striped active' role='progressbar' aria-valuenow=\'"
+          + payload.data.progress + "\' aria-valuemin='0' aria-valuemax='100' style='min-width: 2em; width: "+ payload.data.progress + "%\'>"
+          + payload.data.progress + "%</div></div><div class='subtasks container'></div>";
+          $("#tasks").append(content);
+          // Remove empty message
+          $("#tasks .empty").remove();
+        }
+      } else if (payload.action == "delete") {
+        $("div[data-value-id=" + payload.pk + "]").remove();
+        if (('#items div').length == 0) {
+          $('#tasks').append('<p class="empty">No values yet.</p>')
+        }
+      }
+    } else if (streamName == "subtaskstr") {
+      // Handle different actions
+      if (payload.action == "create") {
+        // Create the new integer value
+        var content = "<div subtask-id='" + payload.pk + "' class='col-md-12'><div class='progress-bar progress-bar-striped active' role='progressbar' aria-valuenow='"
+        + payload.data.progress + "' aria-valuemin='0'aria-valuemax='100' style='min-width: 2em; width: "+ payload.data.progress + "%\'>"
+        + payload.data.url + "</div></br></div><br /><br />";
+        $("div[data-value-id=" + payload.data.parent +"] div.subtasks").append(content);
+
+      } else if (payload.action == "update") {
+        if ($("div[subtask-id=" + payload.pk + "]").length) {
+          $("div[subtask-id=" + payload.pk + "] div.progress-bar").attr("style", function(){
+            return "min-width: 2em; width: " + payload.data.progress + "%";
+          });
+          $("div[subtask-id=" + payload.pk + "] div.progress-bar").text(payload.data.url)
+          if (payload.data.progress < 100) {
+            $("div[subtask-id=" + payload.pk + "] div.progress-bar").addClass('progress-bar-striped active')
+          }
+          else {
+            $("div[subtask-id=" + payload.pk + "] div.progress-bar").removeClass('progress-bar-striped active')
+            try {
+              var res = JSON.parse(payload.data.results)
+              // console.log(obj);
+              if ("nikto" in res || "csrf" in res || "xss" in res || "sql" in res) {
+                $("div[subtask-id=" + payload.pk + "]").append("<div class='results well well-sm'></div>")
+                $("div[subtask-id=" + payload.pk + "] div.progress-bar").addClass('dropdown-toggle progress-bar-danger')
+                $("div[subtask-id=" + payload.pk + "] div.progress-bar").attr("data-target", function(){
+                                                          return "#dropmenu" + payload.pk;
+                                                        })
+                $("div[subtask-id=" + payload.pk + "] div.progress-bar").attr("data-toggle", "collapse")
+                $("div[subtask-id=" + payload.pk + "] div.results").addClass('collapse')
+                $("div[subtask-id=" + payload.pk + "] div.results").attr("id", function(){
+                                                          return "dropmenu" + payload.pk;
+                                                        })
+                if ("nikto" in res) {
+                  $("div[subtask-id=" + payload.pk + "] div.results").append("<div class='panel panel-default'><div class='panel-heading'><h3 class='panel-title'>Nikto:</h3></div></div>")
+                  $("div[subtask-id=" + payload.pk + "] div.results").append("<div class='panel panel-default'><div class='panel-body'>"+ res.nikto.replace(/\n/g,"<br>") +"</div></div>")
+                  console.log(res.nikto);
+                }
+                if ("csrf" in res) {
+                  $("div[subtask-id=" + payload.pk + "] div.results").append("<div class='panel panel-default'><div class='panel-heading'><h3 class='panel-title'>CSRF:</h3></div></div>")
+                  $("div[subtask-id=" + payload.pk + "] div.results").append("<div class='panel panel-default'><div class='panel-body'>"+ res.csrf.replace(/\n/g,"<br>") +"</div></div>")
+                }
+                if ("xss" in res) {
+                  $("div[subtask-id=" + payload.pk + "] div.results").append("<div class='panel panel-default'><div class='panel-heading'><h3 class='panel-title'>XSS:</h3></div></div>")
+                  $("div[subtask-id=" + payload.pk + "] div.results").append("<div class='panel panel-default'><div class='panel-body'>"+ res.xss.replace(/\n/g,"<br>") +"</div></div>")
+                }
+                if ("sql" in res) {
+                  $("div[subtask-id=" + payload.pk + "] div.results").append("<div class='panel panel-default'><div class='panel-heading'><h3 class='panel-title'>SQL Injections:</h3></div></div>")
+                  $("div[subtask-id=" + payload.pk + "] div.results").append("<div class='panel panel-default'><div class='panel-body'>"+ res.sql.replace(/\n/g,"<br>") +"</div></div>")
+                }
+              }
+            }
+            catch(err){
+              console.log('ERROR:' + err)
+            }
+          }
+        } else {
+          var content = "<div subtask-id='" + payload.pk + "' class='col-md-12'><div class='progress-bar progress-bar-striped active' role='progressbar' aria-valuenow='"
+          + payload.data.progress + "' aria-valuemin='0'aria-valuemax='100' style='min-width: 2em; width: "+ payload.data.progress + "%\'>"
+          + payload.data.url + "</div></div><br /><br />";
+          $("div[data-value-id=" + payload.data.parent +"] div.subtasks").append(content);
+        }
+      } else {
+        console.log("Unknown action " + payload.action);
+      }
+    } else {
+      console.log("Unknown stream " + streamName);
+    }
+  };
+  // Helpful debugging
+  socket.onopen = function() { console.log("Connected to notification socket"); }
+  socket.onclose = function() { console.log("Disconnected to notification socket"); }
+});
+</script>
+{% endblock %}
